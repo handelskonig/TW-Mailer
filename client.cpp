@@ -5,12 +5,14 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <string>
 #include <string.h>
 #include <iostream>
+#include <sstream> 
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define BUF 4096
+#define BUF 3049 //max size needed for 3000 character message + command, sender, receiver data
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -91,81 +93,92 @@ int main(int argc, char **argv)
       printf("%s", buffer); // ignore error
    }
 
-   std::string command;
-
    do
    {
+      memset(buffer, 0, BUF); //empying out buffer
+
+      //////////////////SENDING COMMAND TO SERVER////////////////
+      std::string command;
       std::cout << "Please enter your command:\n>> ";
-      std::cin >> command;
+      std::getline(std::cin, command);
+      strcat(buffer, (command + "\n").c_str());
 
-      if (fgets(buffer, BUF, stdin) != NULL)
-      {
-         int size = strlen(buffer);
-         // remove new-line signs from string at the end
-         if (buffer[size - 2] == '\r' && buffer[size - 1] == '\n')
-         {
-            size -= 2;
-            buffer[size] = 0;
-         }
-         else if (buffer[size - 1] == '\n')
-         {
-            --size;
-            buffer[size] = 0;
-         }
-         isQuit = strcmp(buffer, "quit") == 0;
 
-         //////////////////////////////////////////////////////////////////////
-         // SEND DATA
-         // https://man7.org/linux/man-pages/man2/send.2.html
-         // send will fail if connection is closed, but does not set
-         // the error of send, but still the count of bytes sent
-         if ((send(create_socket, buffer, size, 0)) == -1) 
-         {
-            // in case the server is gone offline we will still not enter
-            // this part of code: see docs: https://linux.die.net/man/3/send
-            // >> Successful completion of a call to send() does not guarantee 
-            // >> delivery of the message. A return value of -1 indicates only 
-            // >> locally-detected errors.
-            // ... but
-            // to check the connection before send is sense-less because
-            // after checking the communication can fail (so we would need
-            // to have 1 atomic operation to check...)
-            perror("send error");
-            break;
-         }
+      isQuit = command.compare("quit") == 0;
 
-         //////////////////////////////////////////////////////////////////////
-         // RECEIVE FEEDBACK
-         // consider: reconnect handling might be appropriate in somes cases
-         //           How can we determine that the command sent was received 
-         //           or not? 
-         //           - Resend, might change state too often. 
-         //           - Else a command might have been lost.
-         //
-         // solution 1: adding meta-data (unique command id) and check on the
-         //             server if already processed.
-         // solution 2: add an infrastructure component for messaging (broker)
-         //
-         size = recv(create_socket, buffer, BUF - 1, 0);
-         if (size == -1)
-         {
-            perror("recv error");
-            break;
-         }
-         else if (size == 0)
-         {
-            printf("Server closed remote socket\n"); // ignore error
-            break;
-         }
-         else
-         {
-            buffer[size] = '\0';
-            printf("<< %s\n", buffer); // ignore error
-            if (strcmp("OK", buffer) != 0)
-            {
-               fprintf(stderr, "<< Server error occured, abort\n");
-               break;
+      if(command.compare("send") == 0){
+         std::string sender;
+         std::string receiver;
+         std::string subject;
+         std::string message;
+         std::string line;
+
+
+         //Getting usernames input -> max 16 charcaters
+         do{
+            if (sender.length() > 8 || receiver.length() > 8)
+               std::cout << "Username can not be longer than 8 characters!" << std::endl;
+            std::cout << "Enter username (max. 8 characters): " <<  std::endl;
+            std::getline(std::cin, sender);
+            std::cout << "Enter receiver username (max. 8 characters): " <<  std::endl;
+            std::getline(std::cin, receiver);
+         } while(sender.length() > 8 || receiver.length() > 8);
+
+
+         //Getting subject and message max 
+         do{
+            if (subject.length() + message.length() > 3000)
+               std::cout << "Message too long! " << std::endl;
+            std::cout << "Enter subject line : " <<  std::endl;
+            std::getline(std::cin, subject);
+            std::cout << "Enter message (end message with single '.' in line and enter): " <<  std::endl;
+            while (std::getline(std::cin, line)){
+               if (line == ".")
+                  break;
+              message += (line + "\n");
             }
+         }while(subject.length() + message.length() > 3000); //check to prevent buffer overflow
+            
+            strcat(buffer, (sender + "\n").c_str());
+            strcat(buffer, (receiver + "\n").c_str());
+            strcat(buffer, (subject + "\n").c_str());
+            strcat(buffer, (message + "\n").c_str());
+      }
+      else{
+         std::cout << "That's not a valid Command!\n Valid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
+         strcat(buffer, "ERR");
+      }
+
+      int size = strlen(buffer);
+      //////////////////////////////////////////////////////////////////////
+      // SEND DATA
+      if ((send(create_socket, buffer, size, 0)) == -1) {
+         std::cerr << "send error" << std::endl;
+         break;
+      }
+
+      //////////////////////////////////////////////////////////////////////
+      // RECEIVE FEEDBACK
+
+      size = recv(create_socket, buffer, BUF - 1, 0);
+      if (size == -1)
+      {
+         perror("recv error");
+         break;
+      }
+      else if (size == 0)
+      {
+         printf("Server closed remote socket\n"); // ignore error
+         break;
+      }
+      else
+      {
+         buffer[size] = '\0';
+         printf("<< %s\n", buffer); // ignore error
+         if (strcmp("OK", buffer) != 0)
+         {
+            fprintf(stderr, "<< Server error occured, abort\n");
+            break;
          }
       }
    } while (!isQuit);

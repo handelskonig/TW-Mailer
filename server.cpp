@@ -6,15 +6,18 @@
 #include <unistd.h>
 #include <stdlib.h>
 #include <stdio.h>
+#include <sstream>
 #include <string.h>
 #include <signal.h>
 #include <filesystem>
 #include <dirent.h>
+#include <vector>
+#include <fstream>
 
 
 ///////////////////////////////////////////////////////////////////////////////
 
-#define BUF 4096
+#define BUF 3049 //max size needed for 3000 character message + command, sender, receiver data 
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -26,7 +29,7 @@ namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void *clientCommunication(void *data);
+void *clientCommunication(void *data, char* folder);
 void signalHandler(int sig);
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -138,9 +141,7 @@ int main(int argc, char** argv)
    while (!abortRequested)
    {
       /////////////////////////////////////////////////////////////////////////
-      // ignore errors here... because only information message
-      // https://linux.die.net/man/3/printf
-      printf("Waiting for connections...\n");
+      std::cout << "Waiting for connections...\n" << std::endl;
 
       /////////////////////////////////////////////////////////////////////////
       // ACCEPTS CONNECTION SETUP
@@ -167,7 +168,7 @@ int main(int argc, char** argv)
       printf("Client connected from %s:%d...\n",
              inet_ntoa(cliaddress.sin_addr),
              ntohs(cliaddress.sin_port));
-      clientCommunication(&new_socket); // returnValue can be ignored
+      clientCommunication(&new_socket, argv[2]); // returnValue can be ignored
       new_socket = -1;
    }
 
@@ -188,7 +189,7 @@ int main(int argc, char** argv)
    return EXIT_SUCCESS;
 }
 
-void *clientCommunication(void *data)
+void *clientCommunication(void *data, char* folder)
 {
    char buffer[BUF];
    int size;
@@ -196,7 +197,7 @@ void *clientCommunication(void *data)
 
    ////////////////////////////////////////////////////////////////////////////
    // SEND welcome message
-   strcpy(buffer, "Welcome to myserver!\r\nPlease enter your commands...\r\n");
+   strcpy(buffer, "Welcome to the Mailsystem!\n");
    if (send(*current_socket, buffer, strlen(buffer), 0) == -1)
    {
       perror("send failed");
@@ -206,7 +207,7 @@ void *clientCommunication(void *data)
    do
    {
       /////////////////////////////////////////////////////////////////////////
-      // RECEIVE
+      // RECEIVE COMMAND
       size = recv(*current_socket, buffer, BUF - 1, 0);
       if (size == -1)
       {
@@ -223,22 +224,84 @@ void *clientCommunication(void *data)
 
       if (size == 0)
       {
-         printf("Client closed remote socket\n"); // ignore error
+         std::cerr << "Error: Could not receive Command!" << std::endl;
          break;
       }
 
-      // remove ugly debug message, because of the sent newline of client
-      if (buffer[size - 2] == '\r' && buffer[size - 1] == '\n')
-      {
-         size -= 2;
-      }
-      else if (buffer[size - 1] == '\n')
-      {
-         --size;
+      buffer[size] = '\0';
+      std::cout << "Message received:\n" << std::endl; // ignore error
+
+
+      std::stringstream ss(buffer); //turning buffer to stringstream
+      std::string line;              //splitting string into lines
+      std::vector<std::string> msg;  //adding lines to vector
+
+
+      while(std::getline(ss, line, '\n')) {    //splitting the string into lines
+         msg.push_back(line);
       }
 
-      buffer[size] = '\0';
-      printf("Message received: %s\n", buffer); // ignore error
+      std::string command = msg.at(0);
+      msg.erase(msg.begin());
+
+      for(std::string& data : msg)
+         std::cout << data << std::endl;
+
+      memset(buffer, 0, BUF);
+
+/////////////////////////////////////
+        //SEND//
+        if(command.compare("send") == 0) {
+            //creates path object for mailspooler directory//
+            fs::path current = fs::current_path();
+            fs::path mailspooler = fs::path(current.string() + "/" + folder);
+            std::cout << mailspooler.string();
+
+            //switching to mailspooler directory//
+            try{
+                fs::current_path(mailspooler);
+            }
+            catch(...){
+                std::cerr << "An error occured with the filesystem" << std::endl;
+                strcat(buffer, "ERR");
+            }
+            //creates subfolder in directory with name of receiver//
+            fs::create_directory(msg.at(1));
+
+            //changing to users directory
+            try{
+                fs::current_path(mailspooler.string() + "/"  + msg.at(1));
+            }
+            catch(...){
+                std::cerr << "An error occured with the filesystem" << std::endl;
+            }
+            
+            //makes the filename the time it was sent//
+            using namespace std::chrono;
+            auto now = std::chrono::system_clock::now();
+            auto timeT = std::chrono::system_clock::to_time_t(now);
+            std::string time = std::ctime(&timeT); 
+            time.pop_back();  //This is just to remove the ugly ending of the timestamp
+
+            //create file
+            std::ofstream user_msg(time + ".txt");
+
+            user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
+            for(int i = 3; i<msg.size(); i++)
+               user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
+
+            user_msg.close();
+
+            //changing back to base directory
+            try{
+                fs::current_path(current);
+                strcat(buffer, "OK");
+            }
+            catch(...){
+                std::cerr << "An error has occured with the filesystem" << std::endl;
+                strcat(buffer, "ERR");
+            }
+        } 
 
       if (send(*current_socket, "OK", 3, 0) == -1)
       {
