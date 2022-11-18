@@ -25,7 +25,7 @@ int main(int argc, char **argv)
    char buffer[BUF];
    struct sockaddr_in address;
    int size;
-   int isQuit;
+   bool isQuit = false;
 
 
    ////////////////////////////////////////////////////////////////////////////
@@ -104,7 +104,7 @@ int main(int argc, char **argv)
       strcat(buffer, (command + "\n").c_str());
 
 
-      isQuit = command.compare("quit") == 0;
+      //isQuit = command.compare("quit") == 0;
 
       if(command.compare("send") == 0){
          std::string sender;
@@ -144,11 +144,38 @@ int main(int argc, char **argv)
             strcat(buffer, (subject + "\n").c_str());
             strcat(buffer, (message + "\n").c_str());
       }
+      else if (command.compare("quit") == 0){
+         strcat(buffer, "QUIT");
+         isQuit = true;
+      }
+///////////////////////////////
+      //LIST AND READ//
+      else if(command.compare("list") == 0 || command.compare("read") == 0) {
+         std::string user;
+         std::cout << "User: ";
+         do{
+            if (user.length() > 8)
+               std::cout << "Error: username cant be longer than 8 characters!" << std::endl;
+            std::getline(std::cin, user);
+         }while(user.length() > 8 || user.length() == 0);
+
+         strcat(buffer, (user + "\n").c_str());
+
+      ///////This part only for read command /////////
+         if(command.compare("read") == 0){
+            std::string msgindex;
+            std::cout << "Please enter the message number you want to read: ";
+            std::getline(std::cin, msgindex);
+            strcat(buffer, (msgindex + "\n").c_str());
+         }
+      }
+
       else{
          std::cout << "That's not a valid Command!\n Valid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
          strcat(buffer, "ERR");
       }
 
+      
       int size = strlen(buffer);
       //////////////////////////////////////////////////////////////////////
       // SEND DATA
@@ -174,12 +201,7 @@ int main(int argc, char **argv)
       else
       {
          buffer[size] = '\0';
-         printf("<< %s\n", buffer); // ignore error
-         if (strcmp("OK", buffer) != 0)
-         {
-            fprintf(stderr, "<< Server error occured, abort\n");
-            break;
-         }
+         std::cout << buffer << std::endl;; // ignore error
       }
    } while (!isQuit);
 
