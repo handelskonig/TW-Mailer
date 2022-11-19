@@ -149,8 +149,8 @@ int main(int argc, char **argv)
          isQuit = true;
       }
 ///////////////////////////////
-      //LIST AND READ//
-      else if(command.compare("list") == 0 || command.compare("read") == 0) {
+      //LIST, READ, DEL//
+      else if(command.compare("list") == 0 || command.compare("read") == 0 || command.compare("del") == 0) {
          std::string user;
          std::cout << "User: ";
          do{
@@ -161,10 +161,10 @@ int main(int argc, char **argv)
 
          strcat(buffer, (user + "\n").c_str());
 
-      ///////This part only for read command /////////
-         if(command.compare("read") == 0){
+         ///////This part only for read and del command /////////
+         if(command.compare("read") == 0 || command.compare("del") == 0){
             std::string msgindex;
-            std::cout << "Please enter the message number you want to read: ";
+            std::cout << "Please enter the message number you want to " << command << ": ";
             std::getline(std::cin, msgindex);
             strcat(buffer, (msgindex + "\n").c_str());
          }

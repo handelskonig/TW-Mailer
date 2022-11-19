@@ -32,7 +32,135 @@ namespace fs = std::filesystem;
 void *clientCommunication(void *data, char* folder);
 void signalHandler(int sig);
 
+/////////////////////////////////////
+   //SEND//
 ///////////////////////////////////////////////////////////////////////////////
+void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::path current){
+   //switching to mailspooler directory//
+   try{
+      fs::current_path(mailspooler);
+   }
+   catch(...){
+      std::cerr << "An error occured with the filesystem" << std::endl;
+      strcat(buffer, "ERR");
+   }
+   //creates subfolder in directory with name of receiver//
+   fs::create_directory(msg.at(1));
+
+   //changing to users directory
+   try{
+      fs::current_path(mailspooler.string() + "/"  + msg.at(1));
+   }
+   catch(...){
+      std::cerr << "An error occured with the filesystem" << std::endl;
+   }
+   
+   /*//makes the filename the time it was sent//
+   using namespace std::chrono;
+   auto now = std::chrono::system_clock::now();
+   auto timeT = std::chrono::system_clock::to_time_t(now);    //decided later to make the filename the subject line instead
+   std::string time = std::ctime(&timeT); 
+   time.pop_back();  //This is just to remove the ugly ending of the timestamp*/
+
+   int index = 0;
+   for (auto& i : std::filesystem::directory_iterator(fs::current_path())){
+      index++;      //counting how many files are in subdirectory already
+   }
+
+   //create file
+   std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(2));
+
+   user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
+   for(int i = 3; i<msg.size(); i++)
+      user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
+
+   user_msg.close();
+
+   //changing back to base directory
+   try{
+      fs::current_path(current);
+      strcat(buffer, "OK");
+   }
+   catch(...){
+      std::cerr << "An error has occured with the filesystem" << std::endl;
+      strcat(buffer, "ERR");
+   }
+      
+}
+
+///////////////////////////////////////////////////
+/////////////////LIST/////////////////////////////
+void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
+   auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
+   if (fs::exists(usersubdir)){
+      int counter = 0;
+      std::vector<fs::path> messages;
+      for (auto& entry : std::filesystem::directory_iterator(usersubdir)){
+         counter++;                                   //loops through all messages, counts them and saves in vector
+         messages.push_back(entry.path());    
+      }
+
+      strcat(buffer, ("User " + msg.at(0) + " has " + std::to_string(counter) + " messages in his inbox : \n").c_str());
+      for (auto& message : messages){
+         strcat(buffer, (message.filename().string() + "\n").c_str());
+      }
+   }
+   else
+      strcat(buffer, "The user you have been looking for doesn't exist or hasn't received any messsages yet!\n");
+}
+
+//7///////////////////////////////////////////////////////////
+/////////////////////READ AND DELETE//////////////////////////
+ void read_del(char* buffer, fs::path mailspooler, std::vector<std::string> msg, std::string command){     
+   auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
+   if (fs::exists(usersubdir)){
+      for (auto& entry : std::filesystem::directory_iterator(usersubdir)){
+         memset(buffer, 0, BUF);
+         //Looks for '.' in every entry and cuts off rest of string to get message index
+         std::string msgindex = entry.path().filename().string().substr(0, entry.path().filename().string().find("."));
+
+         //enters this condition if file is found
+         if(msgindex.compare(msg.at(1)) == 0){
+            std::ifstream message (entry.path());
+            //Reading every line of file into buffer
+            if (command.compare("read") == 0){
+               if(message.is_open()){
+                  strcat(buffer, "OK\n");
+                  std::string line;
+                  while(message){
+                     std::getline(message, line);
+                     strcat(buffer, (line + "\n").c_str());
+                  }
+               }
+               else{
+                  strcat(buffer, "ERR\n");
+                  strcat(buffer, "Could not open file\n");
+               }
+            }
+            //trying to remove file
+            else if(command.compare("del") == 0){
+               if (fs::remove(entry.path()))
+                  strcat(buffer, "OK\n");
+               else{
+                  strcat(buffer, "ERR\n");
+                  strcat(buffer, "Could not delete file\n");
+               }
+            }          
+            break;
+         }
+         strcat(buffer, "ERR\n");
+         strcat(buffer, "Message with that number does not exist. Use command 'list' to check messages!");
+      }
+      /*   Giving this approach up for simplicity
+      if (strtok(buffer, "\n") != "OK"){
+         strcat(buffer, "ERR\n");
+         strcat(buffer, "Message with that number does not exist. Use command 'list' to check messages!");
+      }*/
+   }
+   else{
+      strcat(buffer, "The user you have been looking for doesn't exist or hasn't received any messsages yet!\n");
+   }
+ }
 
 int main(int argc, char** argv)
 {
@@ -148,8 +276,8 @@ int main(int argc, char** argv)
       // blocking, might have an accept-error on ctrl+c
       addrlen = sizeof(struct sockaddr_in);
       if ((new_socket = accept(create_socket,
-                               (struct sockaddr *)&cliaddress,
-                               &addrlen)) == -1)
+                     (struct sockaddr *)&cliaddress,
+                     &addrlen)) == -1)
       {
          if (abortRequested)
          {
@@ -253,115 +381,16 @@ void *clientCommunication(void *data, char* folder)
       fs::path current = fs::current_path();
       fs::path mailspooler = fs::path(current.string() + "/" + folder);
 
-/////////////////////////////////////
-      //SEND//
-      if(command.compare("send") == 0) {
-
-         //switching to mailspooler directory//
-         try{
-               fs::current_path(mailspooler);
-         }
-         catch(...){
-               std::cerr << "An error occured with the filesystem" << std::endl;
-               strcat(buffer, "ERR");
-         }
-         //creates subfolder in directory with name of receiver//
-         fs::create_directory(msg.at(1));
-
-         //changing to users directory
-         try{
-               fs::current_path(mailspooler.string() + "/"  + msg.at(1));
-         }
-         catch(...){
-               std::cerr << "An error occured with the filesystem" << std::endl;
-         }
-         
-         /*//makes the filename the time it was sent//
-         using namespace std::chrono;
-         auto now = std::chrono::system_clock::now();
-         auto timeT = std::chrono::system_clock::to_time_t(now);    //decided later to make the filename the subject line instead
-         std::string time = std::ctime(&timeT); 
-         time.pop_back();  //This is just to remove the ugly ending of the timestamp*/
-
-         int index = 0;
-         for (auto& i : std::filesystem::directory_iterator(mailspooler)){
-            index++;      //counting how many files are in subdirectory already
-         }
-
-         //create file
-         std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(2));
-
-         user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
-         for(int i = 3; i<msg.size(); i++)
-            user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
-
-         user_msg.close();
-
-         //changing back to base directory
-         try{
-               fs::current_path(current);
-               strcat(buffer, "OK");
-         }
-         catch(...){
-               std::cerr << "An error has occured with the filesystem" << std::endl;
-               strcat(buffer, "ERR");
-         }
-      }
-///////////////////////////////////////////////////
-/////////////////LIST
-      else if (command.compare("list") == 0){
-         auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
-         if (fs::exists(usersubdir)){
-            int counter = 0;
-            std::vector<fs::path> messages;
-            for (auto& entry : std::filesystem::directory_iterator(usersubdir)){
-               counter++;                                   //loops through all messages, counts them and saves in vector
-               messages.push_back(entry.path());    
-            }
-
-            strcat(buffer, ("User " + msg.at(0) + " has " + std::to_string(counter) + " messages in his inbox : \n").c_str());
-            for (auto& message : messages){
-               strcat(buffer, (message.filename().string() + "\n").c_str());
-            }
-         }
-         else
-            strcat(buffer, "The user you have been looking for doesn't exist or hasn't received any messsages yet!\n");
+      if (command.compare("send") == 0){
+         send(mailspooler, buffer, msg, current);
       }
 
-      else if(command.compare("read") == 0){
-         auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
-         if (fs::exists(usersubdir)){
-            for (auto& entry : std::filesystem::directory_iterator(usersubdir)){
-               memset(buffer, 0, BUF);
-               //Looks for '.' in every entry and cuts off rest of string to get message index
-               std::string msgindex = entry.path().filename().string().substr(0, entry.path().filename().string().find("."));
+      if (command.compare("list") == 0){
+         list(buffer, mailspooler, msg);
+      }
 
-               //enters this condition if file is found
-               if(msgindex.compare(msg.at(1)) == 0){
-                  strcat(buffer, "OK\n");
-                  std::ifstream message (entry.path());
-                  //Reading every line of file into buffer
-                  if(message.is_open()){
-                     std::string line;
-                     while(message){
-                        std::getline(message, line);
-                        strcat(buffer, (line + "\n").c_str());
-                     }
-                  }
-                  break;
-               }
-               strcat(buffer, "ERR\n");
-               strcat(buffer, "Message with that number does not exist. Use command 'list' to check messages!");
-            }
-            /*   Giving this approach up for simplicity
-            if (strtok(buffer, "\n") != "OK"){
-               strcat(buffer, "ERR\n");
-               strcat(buffer, "Message with that number does not exist. Use command 'list' to check messages!");
-            }*/
-         }
-         else{
-            strcat(buffer, "The user you have been looking for doesn't exist or hasn't received any messsages yet!\n");
-         }
+      else if(command.compare("read") == 0 || command.compare("del") == 0){
+         read_del(buffer, mailspooler, msg, command);
       }
 
 ////////////////////////////////////////////////////
