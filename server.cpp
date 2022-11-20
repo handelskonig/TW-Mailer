@@ -10,7 +10,6 @@
 #include <string.h>
 #include <signal.h>
 #include <filesystem>
-#include <dirent.h>
 #include <vector>
 #include <fstream>
 
@@ -71,7 +70,7 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
    std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(2));
 
    user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
-   for(int i = 3; i<msg.size(); i++)
+   for(unsigned int i = 3; i<msg.size(); i++)
       user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
 
    user_msg.close();
@@ -174,9 +173,8 @@ int main(int argc, char** argv)
       PORT = atoi(argv[1]);
 
       //checking if folder exists//
-      DIR* folder = opendir(argv[2]);
 
-      if(folder == NULL) {
+      if(!fs::exists(argv[2])) {
          //create directory//
 
          bool succ_cre = fs::create_directory(argv[2]);
@@ -359,7 +357,6 @@ void *clientCommunication(void *data, char* folder)
       buffer[size] = '\0';
       std::cout << "Message received:\n" << std::endl; // ignore error
 
-
       std::stringstream ss(buffer); //turning buffer to stringstream
       std::string line;              //splitting string into lines
       std::vector<std::string> msg;  //adding lines to vector
@@ -385,7 +382,7 @@ void *clientCommunication(void *data, char* folder)
          send(mailspooler, buffer, msg, current);
       }
 
-      if (command.compare("list") == 0){
+      else if (command.compare("list") == 0){
          list(buffer, mailspooler, msg);
       }
 
@@ -393,11 +390,13 @@ void *clientCommunication(void *data, char* folder)
          read_del(buffer, mailspooler, msg, command);
       }
 
-////////////////////////////////////////////////////
-////////////////QUIT///////////////////////////////
       else if (command.compare("quit") == 0){
-         strcat(buffer, "OK");
+         std::cout << "Client disconnected" << std::endl;
+         break;
       } 
+      else {
+         strcat(buffer, "ERR\n");
+      }
 
 ///////////////////////////////////
 //////////////SEND RESPONSE////////

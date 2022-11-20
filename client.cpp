@@ -25,6 +25,7 @@ int main(int argc, char **argv)
    char buffer[BUF];
    struct sockaddr_in address;
    int size;
+   PORT = atoi(argv[2]);
    bool isQuit = false;
 
 
@@ -55,7 +56,6 @@ int main(int argc, char **argv)
       //assign IP-address
       inet_aton(argv[1], &address.sin_addr);
       //assign PORT number
-      PORT = atoi(argv[2]);
       address.sin_port = htons(PORT);
     }
 
@@ -101,10 +101,12 @@ int main(int argc, char **argv)
       std::string command;
       std::cout << "Please enter your command:\n>> ";
       std::getline(std::cin, command);
+      for(char& c : command){
+         c = tolower(c);         //converting string to all lowercase letters so that commands are case insensitive
+      }
       strcat(buffer, (command + "\n").c_str());
 
 
-      //isQuit = command.compare("quit") == 0;
 
       if(command.compare("send") == 0){
          std::string sender;
@@ -129,8 +131,12 @@ int main(int argc, char **argv)
          do{
             if (subject.length() + message.length() > 3000)
                std::cout << "Message too long! " << std::endl;
-            std::cout << "Enter subject line : " <<  std::endl;
-            std::getline(std::cin, subject);
+            do{
+               if (subject.length() > 80)
+                  std::cout << "Subject line can not be longer than 80 characters" << std::endl;
+               std::cout << "Enter subject line : " <<  std::endl;
+               std::getline(std::cin, subject);
+            }while (subject.length() > 80);
             std::cout << "Enter message (end message with single '.' in line and enter): " <<  std::endl;
             while (std::getline(std::cin, line)){
                if (line == ".")
@@ -144,6 +150,7 @@ int main(int argc, char **argv)
             strcat(buffer, (subject + "\n").c_str());
             strcat(buffer, (message + "\n").c_str());
       }
+
       else if (command.compare("quit") == 0){
          strcat(buffer, "QUIT");
          isQuit = true;
@@ -172,15 +179,20 @@ int main(int argc, char **argv)
 
       else{
          std::cout << "That's not a valid Command!\n Valid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
-         strcat(buffer, "ERR");
+         strcat(buffer, "Invalid command error\n");
+         break;
       }
 
       
       int size = strlen(buffer);
       //////////////////////////////////////////////////////////////////////
-      // SEND DATA
+      // SEND DATA 
       if ((send(create_socket, buffer, size, 0)) == -1) {
          std::cerr << "send error" << std::endl;
+         break;
+      }
+      
+      if (isQuit){
          break;
       }
 
