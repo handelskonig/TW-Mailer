@@ -19,6 +19,7 @@ CC=g++
 #           These are HP-UX specific flags.
 #############################################################################################
 CFLAGS=-g -Wall -Wextra -O -std=c++2a -I /usr/local/include/gtest/ -pthread
+LIBS=-lldap -llber
 GTEST=/usr/local/lib/libgtest.a
 
 rebuild: clean all
@@ -28,6 +29,9 @@ clean:
 	clear
 	rm -f bin/* obj/*
 
+./obj/mypw.o: mypw.cpp
+	${CC} ${CFLAGS} -o obj/mypw.o mypw.cpp -c
+
 ./obj/client.o: client.cpp
 	${CC} ${CFLAGS} -o obj/client.o client.cpp -c
 
@@ -35,7 +39,7 @@ clean:
 	${CC} ${CFLAGS} -o obj/server.o server.cpp -c 
 
 ./bin/server: ./obj/server.o
-	${CC} ${CFLAGS} -o bin/server obj/server.o
+	${CC} ${CFLAGS} -o bin/server obj/server.o ${LIBS}
 
 ./bin/client: ./obj/client.o
 	${CC} ${CFLAGS} -o bin/client obj/client.o

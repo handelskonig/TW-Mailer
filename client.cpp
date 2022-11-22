@@ -9,6 +9,7 @@
 #include <string.h>
 #include <iostream>
 #include <sstream> 
+#include "mypw.cpp"
 
 ///////////////////////////////////////////////////////////////////////////////
 
@@ -106,10 +107,24 @@ int main(int argc, char **argv)
       }
       strcat(buffer, (command + "\n").c_str());
 
+      if(command.compare("login") == 0){
+         std::string username;
 
+         do{
+            if (username.length() > 8)
+               std::cout << "Username can not be longer than 8 characters!" << std::endl;
+            std::cout << "Enter username (FHTW username): " <<  std::endl;
+            std::getline(std::cin, username);
+         }while(username.length() > 8);
 
-      if(command.compare("send") == 0){
-         std::string sender;
+         std::string pw = getpass();
+
+         strcat(buffer, (username + "\n").c_str());
+         strcat(buffer, (pw + "\n").c_str());
+
+      }
+
+      else if(command.compare("send") == 0){
          std::string receiver;
          std::string subject;
          std::string message;
@@ -118,13 +133,11 @@ int main(int argc, char **argv)
 
          //Getting usernames input -> max 16 charcaters
          do{
-            if (sender.length() > 8 || receiver.length() > 8)
-               std::cout << "Username can not be longer than 8 characters!" << std::endl;
-            std::cout << "Enter username (max. 8 characters): " <<  std::endl;
-            std::getline(std::cin, sender);
+            if(receiver.length() > 8)
+               std::cout << "Receiver's username can not be longer than 8 characters" << std::endl;
             std::cout << "Enter receiver username (max. 8 characters): " <<  std::endl;
             std::getline(std::cin, receiver);
-         } while(sender.length() > 8 || receiver.length() > 8);
+         } while(receiver.length() > 8);
 
 
          //Getting subject and message max 
@@ -145,7 +158,6 @@ int main(int argc, char **argv)
             }
          }while(subject.length() + message.length() > 3000); //check to prevent buffer overflow
             
-            strcat(buffer, (sender + "\n").c_str());
             strcat(buffer, (receiver + "\n").c_str());
             strcat(buffer, (subject + "\n").c_str());
             strcat(buffer, (message + "\n").c_str());
@@ -180,9 +192,7 @@ int main(int argc, char **argv)
       else{
          std::cout << "That's not a valid Command!\n Valid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
          strcat(buffer, "Invalid command error\n");
-         break;
       }
-
       
       int size = strlen(buffer);
       //////////////////////////////////////////////////////////////////////

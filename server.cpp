@@ -12,6 +12,7 @@
 #include <filesystem>
 #include <vector>
 #include <fstream>
+#include <ldap.h>
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -30,6 +31,93 @@ namespace fs = std::filesystem;
 
 void *clientCommunication(void *data, char* folder);
 void signalHandler(int sig);
+
+//////////////////////////////////////////////
+int ldap_login(std::string rawLdapUser, char* ldapBindPassword, LDAP* ldapHandle){
+   ////////////////////////////////////////////////////////////////////////////
+   // bind credentials
+   std::string ldapBindUser = "uid=" + rawLdapUser + ",ou=people,dc=technikum-wien,dc=at";   
+   int rc = 0; //return code
+
+   BerValue bindCredentials;
+   bindCredentials.bv_val = (char*)ldapBindPassword;
+   bindCredentials.bv_len = strlen(ldapBindPassword);
+   BerValue *servercredp; // server's credentials
+   rc = ldap_sasl_bind_s(
+      ldapHandle,
+      ldapBindUser.c_str(),
+      LDAP_SASL_SIMPLE,
+      &bindCredentials,
+      NULL,
+      NULL,
+      &servercredp);
+   if (rc != LDAP_SUCCESS)
+   {
+      fprintf(stderr, "LDAP bind error: %s\n", ldap_err2string(rc));
+      ldap_unbind_ext_s(ldapHandle, NULL, NULL);
+      return rc;
+   }
+   return rc;
+}
+
+////////////////////////////////////////////////////////////////////////////
+// setup LDAP connection
+LDAP* ldap_setup_con(){
+   ///////////////////////////////////////////////////////////////////////////
+   // LDAP config
+   const std::string ldapUri = "ldap://ldap.technikum-wien.at:389";
+   const int ldapVersion = LDAP_VERSION3;
+
+   int rc = 0; //return code
+
+   LDAP* ldapHandle;
+   rc = ldap_initialize(&ldapHandle, ldapUri.c_str());
+   if (rc != LDAP_SUCCESS){
+      std::cerr << "ldap_init failed" << std::endl;
+      return nullptr;
+   }
+
+   std::cout << "connected to LDAP server " << ldapUri << std::endl;
+
+   ////////////////////////////////////////////////////////////////////////////
+   // set version options
+   rc = ldap_set_option(
+       ldapHandle,
+       LDAP_OPT_PROTOCOL_VERSION, // OPTION
+       &ldapVersion);             // IN-Value
+
+   if (rc != LDAP_OPT_SUCCESS){
+      std::cerr << "ldap_set_option(PROTOCOL_VERSION): " << ldap_err2string(rc) << std::endl;
+      ldap_unbind_ext_s(ldapHandle, NULL, NULL);
+      return nullptr;
+   }
+   ////////////////////////////////////////////////////////////////////////////
+   // start connection secure (initialize TLS)
+   rc = ldap_start_tls_s(
+      ldapHandle,
+      NULL,
+      NULL);
+       
+   if (rc != LDAP_SUCCESS){
+      std::cerr << "ldap_start_tls_s(): " <<  ldap_err2string(rc) << std::endl;
+      ldap_unbind_ext_s(ldapHandle, NULL, NULL);
+      return nullptr;
+   }
+
+   return ldapHandle;
+}
+
+///////////////////////////////////////////////////////
+ ////LOGIN////
+///////////////////////////////////////////////////////////
+int login(std::string rawLdapUser, char* ldapBindPassword){
+   LDAP* ldapHandle = ldap_setup_con();
+   if (ldapHandle != nullptr){
+      return ldap_login(rawLdapUser, ldapBindPassword, ldapHandle);
+   }
+   return EXIT_FAILURE;
+}
+
 
 /////////////////////////////////////
    //SEND//
@@ -61,10 +149,7 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
    std::string time = std::ctime(&timeT); 
    time.pop_back();  //This is just to remove the ugly ending of the timestamp*/
 
-   int index = 0;
-   for (auto& i : std::filesystem::directory_iterator(fs::current_path())){
-      index++;      //counting how many files are in subdirectory already
-   }
+   int index = std::distance(fs::directory_iterator(fs::current_path()), {});  // checks to see how many files are already in directory
 
    //create file
    std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(2));
@@ -72,7 +157,6 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
    user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
    for(unsigned int i = 3; i<msg.size(); i++)
       user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
-
    user_msg.close();
 
    //changing back to base directory
@@ -108,7 +192,7 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
       strcat(buffer, "The user you have been looking for doesn't exist or hasn't received any messsages yet!\n");
 }
 
-//7///////////////////////////////////////////////////////////
+//////////////////////////////////////////////////////////////
 /////////////////////READ AND DELETE//////////////////////////
  void read_del(char* buffer, fs::path mailspooler, std::vector<std::string> msg, std::string command){     
    auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
@@ -163,6 +247,7 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
 
 int main(int argc, char** argv)
 {
+
    if(argc < 2) {
       std::cerr << "More arguments needed.";
       exit(0);  
@@ -330,6 +415,8 @@ void *clientCommunication(void *data, char* folder)
       return NULL;
    }
 
+   std::string user;
+
    do
    {
       /////////////////////////////////////////////////////////////////////////
@@ -368,34 +455,57 @@ void *clientCommunication(void *data, char* folder)
 
       std::string command = msg.at(0);  //extracting command from message
       msg.erase(msg.begin());
-  
-      for(std::string& data : msg)       //printing out clients message
-         std::cout << data << std::endl;  
-  
+
       memset(buffer, 0, BUF);          //emptying out buffer
- 
-      //creates path object for mailspooler directory//
-      fs::path current = fs::current_path();
-      fs::path mailspooler = fs::path(current.string() + "/" + folder);
 
-      if (command.compare("send") == 0){
-         send(mailspooler, buffer, msg, current);
-      }
-
-      else if (command.compare("list") == 0){
-         list(buffer, mailspooler, msg);
-      }
-
-      else if(command.compare("read") == 0 || command.compare("del") == 0){
-         read_del(buffer, mailspooler, msg, command);
-      }
-
-      else if (command.compare("quit") == 0){
+      if (command.compare("quit") == 0){
          std::cout << "Client disconnected" << std::endl;
          break;
       } 
-      else {
+  
+      if(command.compare("login") != 0 && user.length() > 0){
+         for(std::string& data : msg)       //printing out clients message
+            std::cout << data << std::endl;
+      }
+
+      else{
+         std::cout << msg.at(0) << " attempting to log into LDAP Server..." << std::endl;
+         int rc = login(msg.at(0), (char*)msg.at(1).c_str());
+         if(rc == LDAP_SUCCESS){
+            strcat(buffer, (msg.at(0) + " successfully logged in\n").c_str());
+            user = msg.at(0);
+         }
+         else{
+            strcat(buffer, "ERR\n");
+            strcat(buffer, ldap_err2string(rc));
+            strcat(buffer, "\n");
+         }
+      }
+
+      if(user.length() > 0 || command.compare("quit") == 0){
+         //creates path object for mailspooler directory//
+         fs::path current = fs::current_path();
+         fs::path mailspooler = fs::path(current.string() + "/" + folder);
+
+         if (command.compare("send") == 0){
+            send(mailspooler, buffer, msg, current);
+         }
+
+         else if (command.compare("list") == 0){
+            list(buffer, mailspooler, msg);
+         }
+
+         else if(command.compare("read") == 0 || command.compare("del") == 0){
+            read_del(buffer, mailspooler, msg, command);
+         }
+
+         else if (command.compare("login") != 0){
+            strcat(buffer, "ERR\n");
+         }
+      }
+      else{
          strcat(buffer, "ERR\n");
+         strcat(buffer, "You must log in first to use commands other than quit!");
       }
 
 ///////////////////////////////////
