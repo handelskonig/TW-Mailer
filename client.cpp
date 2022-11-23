@@ -170,16 +170,7 @@ int main(int argc, char **argv)
 ///////////////////////////////
       //LIST, READ, DEL//
       else if(command.compare("list") == 0 || command.compare("read") == 0 || command.compare("del") == 0) {
-         std::string user;
-         std::cout << "User: ";
-         do{
-            if (user.length() > 8)
-               std::cout << "Error: username cant be longer than 8 characters!" << std::endl;
-            std::getline(std::cin, user);
-         }while(user.length() > 8 || user.length() == 0);
-
-         strcat(buffer, (user + "\n").c_str());
-
+         
          ///////This part only for read and del command /////////
          if(command.compare("read") == 0 || command.compare("del") == 0){
             std::string msgindex;
@@ -190,7 +181,7 @@ int main(int argc, char **argv)
       }
 
       else{
-         std::cout << "That's not a valid Command!\n Valid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
+         std::cout << "That's not a valid Command!\nValid commands are:\nSEND\nLIST\nREAD\nDEL\n" << std::endl;
          strcat(buffer, "Invalid command error\n");
       }
       

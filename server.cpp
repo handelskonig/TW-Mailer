@@ -7,12 +7,13 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <sstream>
-#include <string.h>
+#include <string>
 #include <signal.h>
 #include <filesystem>
 #include <vector>
 #include <fstream>
 #include <ldap.h>
+#include <ctime>
 
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -29,8 +30,15 @@ namespace fs = std::filesystem;
 
 ///////////////////////////////////////////////////////////////////////////////
 
-void *clientCommunication(void *data, char* folder);
+void *clientCommunication(void *data, char* folder, char* ip);
 void signalHandler(int sig);
+
+time_t getTimestamp(int addition){
+   using namespace std::chrono;
+   auto now = std::chrono::system_clock::now();
+   time_t timeT = std::chrono::system_clock::to_time_t(now);    //getting timestamp for now
+   return timeT + addition;
+}
 
 //////////////////////////////////////////////
 int ldap_login(std::string rawLdapUser, char* ldapBindPassword, LDAP* ldapHandle){
@@ -118,11 +126,76 @@ int login(std::string rawLdapUser, char* ldapBindPassword){
    return EXIT_FAILURE;
 }
 
+int checkBlacklist(char* ip){
+   fs::path blacklist = fs::current_path().string() + "/blacklist.txt";
+   if(!fs::exists(blacklist)){
+      return -1;
+   }
+   else{
+      std::string line;
+      std::ifstream file (blacklist);
+      struct tm tm;
+
+      if (file.is_open()){
+         while(getline(file, line)){  //loops through all the lines in file
+         
+         time_t now = getTimestamp(0);
+         std::string timestamp_str = line.substr(0, line.find(","));
+         std::string attempts = line.substr(line.find(",") + 1, 1);
+
+            if(line.find(ip) != std::string::npos){     //looks for every line that contains a specific user's ip address
+
+               if (strptime(timestamp_str.c_str(), "%A %b %d %T %Y", &tm) == NULL)    //turn the lines entry timestamp into a time_t obj
+                  std::cerr << "Time string could not be turned into time_t" << std::endl;
+               time_t ent = mktime(&tm);
+               
+               std::cout << line;
+               if(difftime(now, ent) < 60 && stoi(attempts) > 3)
+                  return 4;
+               else if (difftime(now, ent) < 60 && stoi(attempts) == 2)
+                  return 2;
+               else if (difftime(now, ent) < 60 && stoi(attempts) == 1)
+                  return 1;
+               else
+                  return 0;
+            }
+         }
+      }
+      else{
+         std::cerr << "Error opening blacklist... Good for you hacker!" << std::endl;
+      }
+         
+      return 0;
+   } 
+}
+
+int modBlacklist(char* ip, int attempts){
+   fs::path blacklist = fs::current_path().string() + "/blacklist.txt";
+
+   time_t timeT = getTimestamp(0); //current timestamp 
+   time_t timeTp1 = getTimestamp(60); //current timestamp plus 60 secs
+
+   std::string time = std::ctime(&timeT);//turning timestamps to strings
+   std::string timep1 = std::ctime(&timeTp1);
+   time.pop_back();  //removing newline from timestamp
+   timep1.pop_back();
+
+
+   std::ofstream entry (blacklist, std::ios_base::app);
+   //current timestamp, attempts and user ip is being saved in file
+   entry << time << "," << attempts << "," << ip;
+   if(attempts > 2)
+      entry << "," << timep1;  //if max attempts are reached than the time where user can try again is added
+   entry << std::endl;
+   entry.close();  
+   return 0;
+   
+}
 
 /////////////////////////////////////
    //SEND//
 ///////////////////////////////////////////////////////////////////////////////
-void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::path current){
+void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::path current, std::string user){
    //switching to mailspooler directory//
    try{
       fs::current_path(mailspooler);
@@ -132,11 +205,11 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
       strcat(buffer, "ERR");
    }
    //creates subfolder in directory with name of receiver//
-   fs::create_directory(msg.at(1));
+   fs::create_directory(msg.at(0));
 
    //changing to users directory
    try{
-      fs::current_path(mailspooler.string() + "/"  + msg.at(1));
+      fs::current_path(mailspooler.string() + "/"  + user);
    }
    catch(...){
       std::cerr << "An error occured with the filesystem" << std::endl;
@@ -152,10 +225,10 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
    int index = std::distance(fs::directory_iterator(fs::current_path()), {});  // checks to see how many files are already in directory
 
    //create file
-   std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(2));
+   std::ofstream user_msg(std::to_string(index + 1) + ". " + msg.at(1));
 
-   user_msg << "Sender: " << msg.at(0) << std::endl << "Subject: " << msg.at(2) << std::endl << "Message: " << std::endl;
-   for(unsigned int i = 3; i<msg.size(); i++)
+   user_msg << "Sender: " << user << std::endl << "Subject: " << msg.at(1) << std::endl << "Message: " << std::endl;
+   for(unsigned int i = 2; i<msg.size(); i++)
       user_msg << msg.at(i) << std::endl;           //writing every single line from the message into file
    user_msg.close();
 
@@ -173,8 +246,8 @@ void send(fs::path mailspooler, char* buffer, std::vector<std::string> msg, fs::
 
 ///////////////////////////////////////////////////
 /////////////////LIST/////////////////////////////
-void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
-   auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
+void list(char* buffer, fs::path mailspooler, std::string user){
+   auto usersubdir = fs::path(mailspooler.string() + "/" + user);
    if (fs::exists(usersubdir)){
       int counter = 0;
       std::vector<fs::path> messages;
@@ -183,7 +256,7 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
          messages.push_back(entry.path());    
       }
 
-      strcat(buffer, ("User " + msg.at(0) + " has " + std::to_string(counter) + " messages in his inbox : \n").c_str());
+      strcat(buffer, ("User " + user + " has " + std::to_string(counter) + " messages in his inbox : \n").c_str());
       for (auto& message : messages){
          strcat(buffer, (message.filename().string() + "\n").c_str());
       }
@@ -194,8 +267,8 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
 
 //////////////////////////////////////////////////////////////
 /////////////////////READ AND DELETE//////////////////////////
- void read_del(char* buffer, fs::path mailspooler, std::vector<std::string> msg, std::string command){     
-   auto usersubdir = fs::path(mailspooler.string() + "/" + msg.at(0));
+ void read_del(char* buffer, fs::path mailspooler, std::vector<std::string> msg, std::string command, std::string user){     
+   auto usersubdir = fs::path(mailspooler.string() + "/" + user);
    if (fs::exists(usersubdir)){
       for (auto& entry : std::filesystem::directory_iterator(usersubdir)){
          memset(buffer, 0, BUF);
@@ -203,13 +276,15 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
          std::string msgindex = entry.path().filename().string().substr(0, entry.path().filename().string().find("."));
 
          //enters this condition if file is found
-         if(msgindex.compare(msg.at(1)) == 0){
+         if(msgindex.compare(msg.at(0)) == 0){
             std::ifstream message (entry.path());
             //Reading every line of file into buffer
             if (command.compare("read") == 0){
                if(message.is_open()){
-                  strcat(buffer, "OK\n");
+
+                  strcat(buffer, "OK\n");  
                   std::string line;
+
                   while(message){
                      std::getline(message, line);
                      strcat(buffer, (line + "\n").c_str());
@@ -245,8 +320,7 @@ void list(char* buffer, fs::path mailspooler, std::vector<std::string> msg){
    }
  }
 
-int main(int argc, char** argv)
-{
+int main(int argc, char** argv){
 
    if(argc < 2) {
       std::cerr << "More arguments needed.";
@@ -379,7 +453,7 @@ int main(int argc, char** argv)
       printf("Client connected from %s:%d...\n",
              inet_ntoa(cliaddress.sin_addr),
              ntohs(cliaddress.sin_port));
-      clientCommunication(&new_socket, argv[2]); // returnValue can be ignored
+      clientCommunication(&new_socket, argv[2], inet_ntoa(cliaddress.sin_addr)); // returnValue can be ignored
       new_socket = -1;
    }
 
@@ -400,11 +474,13 @@ int main(int argc, char** argv)
    return EXIT_SUCCESS;
 }
 
-void *clientCommunication(void *data, char* folder)
+void *clientCommunication(void *data, char* folder, char* ip)
 {
    char buffer[BUF];
    int size;
    int *current_socket = (int *)data;
+   std::string user;
+   int attemptedLogin = 0;
 
    ////////////////////////////////////////////////////////////////////////////
    // SEND welcome message
@@ -415,7 +491,6 @@ void *clientCommunication(void *data, char* folder)
       return NULL;
    }
 
-   std::string user;
 
    do
    {
@@ -462,50 +537,58 @@ void *clientCommunication(void *data, char* folder)
          std::cout << "Client disconnected" << std::endl;
          break;
       } 
-  
-      if(command.compare("login") != 0 && user.length() > 0){
-         for(std::string& data : msg)       //printing out clients message
-            std::cout << data << std::endl;
-      }
 
-      else{
+      else if (command.compare("login") == 0) {
          std::cout << msg.at(0) << " attempting to log into LDAP Server..." << std::endl;
          int rc = login(msg.at(0), (char*)msg.at(1).c_str());
          if(rc == LDAP_SUCCESS){
+            attemptedLogin = 0;   //reseting attempted logins
             strcat(buffer, (msg.at(0) + " successfully logged in\n").c_str());
-            user = msg.at(0);
+            //setting the user for the session
+            user = msg.at(0); 
          }
          else{
             strcat(buffer, "ERR\n");
             strcat(buffer, ldap_err2string(rc));
+            if(strcmp(ldap_err2string(rc), "Invalid credentials") == 0){
+               attemptedLogin++;
+               std::cout << "failed login attemps: " << attemptedLogin << std::endl;
+            }
+            modBlacklist(ip, attemptedLogin);
+            checkBlacklist(ip);
             strcat(buffer, "\n");
          }
       }
 
-      if(user.length() > 0 || command.compare("quit") == 0){
+      else if(command.compare("login") != 0 && user.length() > 0){
+         
+         //printing out clients message
+         for(std::string& data : msg)       
+         std::cout << data << std::endl;
+
          //creates path object for mailspooler directory//
          fs::path current = fs::current_path();
          fs::path mailspooler = fs::path(current.string() + "/" + folder);
 
          if (command.compare("send") == 0){
-            send(mailspooler, buffer, msg, current);
+            send(mailspooler, buffer, msg, current, user);
          }
 
          else if (command.compare("list") == 0){
-            list(buffer, mailspooler, msg);
+            list(buffer, mailspooler, user);
          }
 
          else if(command.compare("read") == 0 || command.compare("del") == 0){
-            read_del(buffer, mailspooler, msg, command);
+            read_del(buffer, mailspooler, msg, command, user);
          }
 
-         else if (command.compare("login") != 0){
+         else {
             strcat(buffer, "ERR\n");
          }
       }
       else{
          strcat(buffer, "ERR\n");
-         strcat(buffer, "You must log in first to use commands other than quit!");
+         strcat(buffer, "You must log in first to use commands other than quit!\n");
       }
 
 ///////////////////////////////////
